@@ -1,0 +1,119 @@
+{% extends "dm_store/base.html" %}
+
+{% block title %}تتبع طلباتي | بيت الجمال للعطور{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="mb-6">
+        <h2 class="font-luxury text-3xl font-bold text-stone-900">تتبع حالة الطلبات</h2>
+        <p class="text-xs text-gold-600 mt-1">أدخل رقم هاتفك لمتابعة حالة طلبك من بيت الجمال</p>
+    </div>
+
+    <!-- نموذج البحث برقم الهاتف -->
+    <div class="bg-white p-5 rounded-2xl shadow-sm border border-gold-200/80 mb-6">
+        <form id="track-form" class="flex flex-col sm:flex-row gap-3">
+            <input type="tel" id="track-phone" placeholder="أدخل رقم الهاتف المسجل به الطلب..." required
+                   class="flex-grow bg-cream border border-gold-200 rounded-full px-5 py-2.5 text-sm focus:outline-none focus:border-gold-500">
+            <button type="submit"
+                    class="gold-gradient hover:opacity-95 text-white font-bold px-7 py-2.5 rounded-full text-sm transition shadow-sm">
+                بحث عن الطلبات
+            </button>
+        </form>
+    </div>
+
+    <!-- قائمة الطلبات -->
+    <div id="orders-list" class="space-y-4">
+        <div class="text-center py-8 text-stone-400 text-sm">أدخل رقم هاتفك أعلاه لعرض سجل طلباتك.</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const statusColors = {
+        pending: "bg-amber-50 text-amber-800 border-amber-200",
+        confirmed: "bg-gold-100 text-gold-700 border-gold-300",
+        shipped: "bg-purple-50 text-purple-800 border-purple-200",
+        delivered: "bg-emerald-50 text-emerald-800 border-emerald-200",
+        cancelled: "bg-red-50 text-red-700 border-red-200"
+    };
+
+    async function fetchOrders(phone) {
+        const container = document.getElementById("orders-list");
+        container.innerHTML = `<div class="text-center py-8 text-stone-400 text-sm">جاري البحث عن الطلبات...</div>`;
+
+        try {
+            const res = await fetch(`/api/orders/track/?phone=${encodeURIComponent(phone)}`);
+            const orders = await res.json();
+
+            if (!res.ok) {
+                container.innerHTML = `<div class="bg-red-50 text-red-600 p-4 rounded-2xl text-sm">${orders.detail || "حدث خطأ."}</div>`;
+                return;
+            }
+
+            if (orders.length === 0) {
+                container.innerHTML = `<div class="bg-white p-8 rounded-2xl border border-gold-200/70 text-center text-stone-500 text-sm">لا توجد طلبات مسجلة لهذا الرقم حتى الآن.</div>`;
+                return;
+            }
+
+            container.innerHTML = orders.map(order => {
+                const badgeClass = statusColors[order.status] || "bg-stone-100 text-stone-800";
+                const dateStr = new Date(order.created_at).toLocaleDateString("ar-LY", {
+                    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+                });
+
+                const itemsHtml = order.items.map(item => `
+                    <div class="flex justify-between text-xs text-stone-600 py-1.5 border-b border-gold-100/70 last:border-0">
+                        <span>${item.product_name} × <strong>${item.quantity}</strong></span>
+                        <span class="font-medium">${item.line_total} د.ل</span>
+                    </div>
+                `).join("");
+
+                return `
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gold-200/80">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gold-100 pb-3 mb-3">
+                        <div>
+                            <span class="font-mono font-bold text-stone-900 text-base">${order.order_number}</span>
+                            <p class="text-xs text-stone-400 mt-0.5">${dateStr}</p>
+                        </div>
+                        <span class="px-3.5 py-1 rounded-full text-xs font-bold border ${badgeClass}">
+                            ${order.status_display}
+                        </span>
+                    </div>
+
+                    <div class="mb-3 space-y-1">
+                        ${itemsHtml}
+                    </div>
+
+                    <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gold-100 text-sm">
+                        <div class="text-xs text-stone-500">
+                            <span>التوصيل إلى: <strong>${order.city}</strong> - ${order.address}</span>
+                            ${order.google_maps_url ? `<a href="${order.google_maps_url}" target="_blank" class="text-gold-600 font-bold hover:underline mr-2">📍 موقع التسليم</a>` : ""}
+                        </div>
+                        <div class="font-extrabold text-gold-600 text-base">
+                            الإجمالي: ${order.total_amount} د.ل
+                        </div>
+                    </div>
+                </div>
+                `;
+            }).join("");
+        } catch (err) {
+            container.innerHTML = `<div class="bg-red-50 text-red-600 p-4 rounded-2xl text-sm">تعذر الاتصال بالسيرفر.</div>`;
+        }
+    }
+
+    document.getElementById("track-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const phone = document.getElementById("track-phone").value.trim();
+        if (phone) fetchOrders(phone);
+    });
+
+    document.addEventListener("DOMContentLoaded", () => {
+        const { phone } = getCustomer();
+        if (phone) {
+            document.getElementById("track-phone").value = phone;
+            fetchOrders(phone);
+        }
+    });
+</script>
+{% endblock %}

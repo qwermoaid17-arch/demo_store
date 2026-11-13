@@ -1,0 +1,266 @@
+{% extends "dm_store/base.html" %}
+
+{% block title %}حقيبة التسوق وإتمام الطلب | بيت الجمال للعطور{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h2 class="font-luxury text-3xl font-bold text-stone-900">حقيبة التسوق</h2>
+    <p class="text-xs text-gold-600 mt-1">راجع مختاراتك وحدد موقع التوصيل بدقة على الخريطة</p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <!-- العمود الأيمن: قائمة المنتجات في الحقيبة -->
+    <div class="lg:col-span-2 space-y-4" id="cart-items-container">
+        <div class="bg-white p-8 rounded-2xl border border-gold-200/70 text-center text-stone-400">
+            جاري تحميل محتويات الحقيبة...
+        </div>
+    </div>
+
+    <!-- العمود الأيسر: ملخص الحساب ونموذج التوصيل والخريطة -->
+    <div class="bg-white p-6 rounded-2xl shadow-sm border border-gold-200/80 h-fit">
+        <h3 class="font-luxury text-xl font-bold text-stone-900 border-b border-gold-100 pb-3 mb-4">تفاصيل التوصيل وإتمام الطلب</h3>
+
+        <div class="flex justify-between items-center text-base font-bold text-stone-800 mb-5 bg-gold-50 border border-gold-200/60 p-3.5 rounded-xl">
+            <span>إجمالي المختارات:</span>
+            <span id="cart-subtotal" class="text-gold-600 text-xl font-extrabold">0.00 د.ل</span>
+        </div>
+
+        <form id="checkout-form" class="space-y-4">
+            <div>
+                <label class="block text-xs font-bold text-stone-600 mb-1">الاسم الكامل *</label>
+                <input type="text" id="order-name" required
+                       class="w-full bg-cream border border-gold-200 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-gold-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-stone-600 mb-1">رقم الهاتف *</label>
+                <input type="tel" id="order-phone" required
+                       class="w-full bg-cream border border-gold-200 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-gold-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-stone-600 mb-1">المدينة *</label>
+                <input type="text" id="order-city" value="زليتن" placeholder="مثال: زليتن، مصراتة، طرابلس..." required
+                       class="w-full bg-cream border border-gold-200 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-gold-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-stone-600 mb-1">وصف العنوان (أقرب نقطة دالة) *</label>
+                <textarea id="order-address" rows="2" placeholder="اسم المنطقة أو أقرب مسجد / مدرسة..." required
+                          class="w-full bg-cream border border-gold-200 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-gold-500"></textarea>
+            </div>
+
+            <!-- قسم تحديد الموقع على الخريطة -->
+            <div>
+                <div class="flex items-center justify-between mb-1.5">
+                    <label class="block text-xs font-bold text-stone-600">حدد موقع التسليم على الخريطة</label>
+                    <button type="button" id="locate-me-btn"
+                            class="text-xs bg-obsidian text-gold-300 hover:bg-stone-800 px-3 py-1 rounded-full font-bold transition">
+                        📍 موقعي الحالي (GPS)
+                    </button>
+                </div>
+                <div id="delivery-map" class="w-full h-56 rounded-xl border border-gold-300 z-10 shadow-inner"></div>
+                <p id="coords-status" class="text-[11px] text-stone-400 mt-1.5">انقر على الخريطة أو اسحب العلامة لتحديد نقطة التسليم بدقة.</p>
+                <input type="hidden" id="order-lat">
+                <input type="hidden" id="order-lng">
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold text-stone-600 mb-1">ملاحظات إضافية</label>
+                <input type="text" id="order-notes" placeholder="تغليف هدية، وقت التوصيل المفضل..."
+                       class="w-full bg-cream border border-gold-200 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-gold-500">
+            </div>
+
+            <button type="submit" id="submit-order-btn"
+                    class="w-full gold-gradient hover:opacity-95 text-white font-bold py-3 rounded-full transition shadow-md text-sm">
+                تأكيد وإرسال الطلب الآن
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let map, marker;
+
+    function initMap() {
+        // التمركز الافتراضي على مدينة زليتن (مقر فروع بيت الجمال)
+        const defaultLat = 32.4674;
+        const defaultLng = 14.5687;
+
+        map = L.map("delivery-map").setView([defaultLat, defaultLng], 13);
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+
+        marker = L.marker([defaultLat, defaultLng], { draggable: true }).addTo(map);
+
+        marker.on("dragend", function () {
+            const pos = marker.getLatLng();
+            setCoordinates(pos.lat, pos.lng);
+        });
+
+        map.on("click", function (e) {
+            marker.setLatLng(e.latlng);
+            setCoordinates(e.latlng.lat, e.latlng.lng);
+        });
+    }
+
+    function setCoordinates(lat, lng) {
+        const fixedLat = lat.toFixed(6);
+        const fixedLng = lng.toFixed(6);
+        document.getElementById("order-lat").value = fixedLat;
+        document.getElementById("order-lng").value = fixedLng;
+        document.getElementById("coords-status").innerHTML =
+            `<span class="text-emerald-700 font-bold">✓ تم تحديد الموقع بدقة: ${fixedLat}, ${fixedLng}</span>`;
+    }
+
+    document.getElementById("locate-me-btn").addEventListener("click", () => {
+        if (!navigator.geolocation) {
+            alert("متصفحك لا يدعم تحديد الموقع الجغرافي.");
+            return;
+        }
+        const statusEl = document.getElementById("coords-status");
+        statusEl.textContent = "جاري تحديد موقعك...";
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                map.setView([lat, lng], 16);
+                marker.setLatLng([lat, lng]);
+                setCoordinates(lat, lng);
+            },
+            () => {
+                statusEl.innerHTML = `<span class="text-red-500">تعذر الوصول للموقع، يرجى السماح بالصلاحية أو التحديد يدوياً على الخريطة.</span>`;
+            }
+        );
+    });
+
+    async function loadCart() {
+        const { name, phone } = getCustomer();
+        document.getElementById("order-name").value = name;
+        document.getElementById("order-phone").value = phone;
+
+        const container = document.getElementById("cart-items-container");
+        if (!phone) {
+            container.innerHTML = `<div class="bg-white p-8 rounded-2xl border border-gold-200/70 text-center text-stone-500">يرجى إدخال اسمك ورقم هاتفك في الشريط العلوي لعرض حقيبة التسوق.</div>`;
+            return;
+        }
+
+        const res = await fetch(`/api/cart/?phone=${encodeURIComponent(phone)}`);
+        if (!res.ok) return;
+
+        const cart = await res.json();
+        document.getElementById("cart-subtotal").textContent = `${cart.subtotal} د.ل`;
+        document.getElementById("nav-cart-count").textContent = cart.total_items || 0;
+
+        if (!cart.items || cart.items.length === 0) {
+            container.innerHTML = `
+                <div class="bg-white p-10 rounded-2xl border border-gold-200/70 text-center">
+                    <p class="text-stone-500 mb-4">حقيبة التسوق فارغة حالياً.</p>
+                    <a href="/" class="inline-block gold-gradient text-white px-6 py-2.5 rounded-full text-sm font-bold shadow-sm">استكشف التشكيلة</a>
+                </div>`;
+            return;
+        }
+
+        container.innerHTML = cart.items.map(item => `
+            <div class="bg-white p-4 rounded-2xl border border-gold-200/70 flex items-center justify-between gap-4 shadow-sm">
+                <div class="flex items-center gap-4">
+                    ${item.product_image
+                        ? `<img src="${item.product_image}" class="w-16 h-16 rounded-xl object-cover border border-gold-200">`
+                        : `<div class="w-16 h-16 rounded-xl bg-gold-50 border border-gold-200 flex items-center justify-center text-xs text-gold-600 font-luxury">بيت الجمال</div>`
+                    }
+                    <div>
+                        <h4 class="font-bold text-stone-900 text-sm">${item.product_name}</h4>
+                        <p class="text-xs text-stone-500 mt-0.5">سعر القطعة: ${item.unit_price} د.ل</p>
+                        <p class="text-sm font-extrabold text-gold-600 mt-1">المجموع: ${item.line_total} د.ل</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button onclick="updateQuantity(${item.product}, ${item.quantity - 1})"
+                            class="w-8 h-8 rounded-full bg-gold-50 hover:bg-gold-100 border border-gold-200 font-bold text-stone-700">-</button>
+                    <span class="w-8 text-center font-bold text-sm">${item.quantity}</span>
+                    <button onclick="updateQuantity(${item.product}, ${item.quantity + 1})"
+                            class="w-8 h-8 rounded-full bg-gold-50 hover:bg-gold-100 border border-gold-200 font-bold text-stone-700">+</button>
+                    <button onclick="removeItem(${item.product})"
+                            class="mr-2 text-red-500 hover:text-red-700 text-xs font-bold px-2 py-1">حذف</button>
+                </div>
+            </div>
+        `).join("");
+    }
+
+    async function updateQuantity(productId, newQty) {
+        const { name, phone } = getCustomer();
+        const res = await fetch("/api/cart/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone, name, product_id: productId, quantity: newQty })
+        });
+        if (res.ok) {
+            loadCart();
+        } else {
+            const err = await res.json();
+            alert(err.detail || "تعذر تحديث الكمية.");
+        }
+    }
+
+    async function removeItem(productId) {
+        const { phone } = getCustomer();
+        const res = await fetch("/api/cart/", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone, product_id: productId })
+        });
+        if (res.ok) loadCart();
+    }
+
+    document.getElementById("checkout-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById("submit-order-btn");
+        btn.disabled = true;
+        btn.textContent = "جاري تأكيد الطلب...";
+
+        const payload = {
+            name: document.getElementById("order-name").value.trim(),
+            phone: document.getElementById("order-phone").value.trim(),
+            city: document.getElementById("order-city").value.trim(),
+            address: document.getElementById("order-address").value.trim(),
+            latitude: document.getElementById("order-lat").value || null,
+            longitude: document.getElementById("order-lng").value || null,
+            notes: document.getElementById("order-notes").value.trim(),
+        };
+
+        try {
+            const res = await fetch("/api/orders/checkout/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                localStorage.setItem("customer_name", payload.name);
+                localStorage.setItem("customer_phone", payload.phone);
+                alert(`شكراً لتسوقك من بيت الجمال! تم تسجيل طلبك برقم: ${data.order_number}`);
+                window.location.href = "/track/";
+            } else {
+                alert(data.detail || "حدث خطأ أثناء إرسال الطلب.");
+            }
+        } catch (err) {
+            alert("تعذر الاتصال بالسيرفر.");
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "تأكيد وإرسال الطلب الآن";
+        }
+    });
+
+    document.addEventListener("DOMContentLoaded", () => {
+        initMap();
+        loadCart();
+    });
+</script>
+{% endblock %}

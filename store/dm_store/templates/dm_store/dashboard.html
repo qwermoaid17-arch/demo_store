@@ -1,0 +1,199 @@
+{% extends "dm_store/base.html" %}
+
+{% block title %}لوحة تحكم الإدارة | بيت الجمال للعطور{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+    <div>
+        <h2 class="font-luxury text-3xl font-bold text-stone-900">لوحة تحكم الإدارة والمخزن</h2>
+        <p class="text-xs text-gold-600 mt-1">متابعة مبيعات بيت الجمال، صافي الأرباح، وحالات الطلبات الفورية</p>
+    </div>
+    <a href="/admin/" target="_blank"
+       class="bg-obsidian hover:bg-stone-800 text-gold-400 border border-gold-500/40 px-5 py-2.5 rounded-full text-xs font-bold transition shadow-sm">
+        + إدارة الأصناف والمخزن المتقدمة
+    </a>
+</div>
+
+<!-- بطاقات الإحصائيات -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <div class="bg-white p-5 rounded-2xl shadow-sm border border-gold-200/80">
+        <p class="text-xs text-stone-500 font-medium">إجمالي المبيعات المؤكدة</p>
+        <p id="stat-revenue" class="text-2xl font-extrabold text-stone-900 mt-2">0.00 د.ل</p>
+    </div>
+
+    <div class="bg-obsidian p-5 rounded-2xl shadow-sm border border-gold-500/40">
+        <p class="text-xs text-gold-200 font-medium">صافي الربح الفعلي</p>
+        <p id="stat-profit" class="text-2xl font-extrabold text-gold-400 mt-2">0.00 د.ل</p>
+    </div>
+
+    <div class="bg-white p-5 rounded-2xl shadow-sm border border-gold-200/80">
+        <p class="text-xs text-stone-500 font-medium">طلبات بانتظار المراجعة</p>
+        <p id="stat-pending" class="text-2xl font-extrabold text-amber-600 mt-2">0</p>
+    </div>
+
+    <div class="bg-white p-5 rounded-2xl shadow-sm border border-gold-200/80">
+        <p class="text-xs text-stone-500 font-medium">الطلبات المؤكدة والمكتملة</p>
+        <p id="stat-confirmed" class="text-2xl font-extrabold text-emerald-600 mt-2">0</p>
+    </div>
+</div>
+
+<!-- قسم تنبيهات المخزن والأكثر مبيعاً -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+    <div class="bg-white p-5 rounded-2xl shadow-sm border border-gold-200/80">
+        <h3 class="font-bold text-stone-800 text-sm border-b border-gold-100 pb-2.5 mb-3 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+            تنبيهات نواقص المخزن (3 قطع أو أقل)
+        </h3>
+        <div id="low-stock-list" class="space-y-2 text-xs text-stone-600">
+            جاري التحميل...
+        </div>
+    </div>
+
+    <div class="bg-white p-5 rounded-2xl shadow-sm border border-gold-200/80">
+        <h3 class="font-bold text-stone-800 text-sm border-b border-gold-100 pb-2.5 mb-3 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-gold-500"></span>
+            الأصناف الأكثر طلباً
+        </h3>
+        <div id="top-selling-list" class="space-y-2 text-xs text-stone-600">
+            جاري التحميل...
+        </div>
+    </div>
+</div>
+
+<!-- جدول إدارة الطلبات -->
+<div class="bg-white rounded-2xl shadow-sm border border-gold-200/80 overflow-hidden">
+    <div class="p-5 border-b border-gold-100 flex items-center justify-between bg-gold-50/40">
+        <h3 class="font-bold text-stone-900 text-base">سجل الطلبات الواردة</h3>
+        <button onclick="loadDashboardData()" class="text-xs text-gold-700 font-bold hover:underline">↻ تحديث البيانات</button>
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="w-full text-right text-sm">
+            <thead class="bg-obsidian text-gold-200 text-xs">
+                <tr>
+                    <th class="py-3.5 px-4">رقم الطلب</th>
+                    <th class="py-3.5 px-4">الزبون والهاتف</th>
+                    <th class="py-3.5 px-4">العنوان والخريطة</th>
+                    <th class="py-3.5 px-4">المختارات</th>
+                    <th class="py-3.5 px-4">الإجمالي</th>
+                    <th class="py-3.5 px-4">حالة الطلب</th>
+                </tr>
+            </thead>
+            <tbody id="orders-table-body" class="divide-y divide-gold-100 text-xs">
+                <tr>
+                    <td colspan="6" class="py-8 text-center text-stone-400">جاري تحميل الطلبات...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadDashboardData() {
+        await Promise.all([loadAnalytics(), loadAllOrders()]);
+    }
+
+    async function loadAnalytics() {
+        const res = await fetch("/api/dashboard/analytics/");
+        if (!res.ok) return;
+        const data = await res.json();
+
+        document.getElementById("stat-revenue").textContent = `${data.total_revenue} د.ل`;
+        document.getElementById("stat-profit").textContent = `${data.total_profit} د.ل`;
+        document.getElementById("stat-pending").textContent = data.pending_orders_count;
+        document.getElementById("stat-confirmed").textContent = data.confirmed_orders_count;
+
+        const lowStockEl = document.getElementById("low-stock-list");
+        if (data.low_stock_products.length === 0) {
+            lowStockEl.innerHTML = `<p class="text-emerald-700 font-medium">✓ جميع الأصناف متوفرة بكميات جيدة.</p>`;
+        } else {
+            lowStockEl.innerHTML = data.low_stock_products.map(p => `
+                <div class="flex justify-between items-center bg-red-50 px-3.5 py-2 rounded-xl text-red-800">
+                    <span><strong>${p.name}</strong> (${p.sku})</span>
+                    <span class="font-bold">المتبقي: ${p.stock_quantity}</span>
+                </div>
+            `).join("");
+        }
+
+        const topSellingEl = document.getElementById("top-selling-list");
+        if (data.top_selling_products.length === 0) {
+            topSellingEl.innerHTML = `<p class="text-stone-400">لا توجد مبيعات مؤكدة بعد.</p>`;
+        } else {
+            topSellingEl.innerHTML = data.top_selling_products.map(p => `
+                <div class="flex justify-between items-center bg-gold-50/70 px-3.5 py-2 rounded-xl">
+                    <span><strong>${p.product__name}</strong></span>
+                    <span class="font-bold text-gold-700">${p.total_sold} قطعة (${p.revenue} د.ل)</span>
+                </div>
+            `).join("");
+        }
+    }
+
+    async function loadAllOrders() {
+        const tbody = document.getElementById("orders-table-body");
+        const res = await fetch("/api/orders/");
+        if (!res.ok) {
+            tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-red-500">غير مصرح بعرض الطلبات.</td></tr>`;
+            return;
+        }
+
+        const orders = await res.json();
+        if (orders.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-stone-400">لا توجد طلبات مسجلة حتى الآن.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = orders.map(o => {
+            const itemsSummary = o.items.map(i => `${i.product_name} (×${i.quantity})`).join("، ");
+            const mapLink = o.google_maps_url
+                ? `<a href="${o.google_maps_url}" target="_blank" class="inline-block mt-1 text-gold-700 hover:underline font-bold">📍 فتح في خرائط جوجل</a>`
+                : `<span class="text-stone-400 block mt-1">بدون إحداثيات</span>`;
+
+            return `
+            <tr class="hover:bg-gold-50/40 transition">
+                <td class="py-3.5 px-4 font-mono font-bold text-stone-900">${o.order_number}</td>
+                <td class="py-3.5 px-4">
+                    <div class="font-bold text-stone-900">${o.customer_name}</div>
+                    <div class="text-stone-500" dir="ltr">${o.customer_phone}</div>
+                </td>
+                <td class="py-3.5 px-4 max-w-xs">
+                    <div class="font-medium">${o.city} - ${o.address}</div>
+                    ${mapLink}
+                </td>
+                <td class="py-3.5 px-4 max-w-xs text-stone-600">${itemsSummary}</td>
+                <td class="py-3.5 px-4 font-extrabold text-gold-700">${o.total_amount} د.ل</td>
+                <td class="py-3.5 px-4">
+                    <select onchange="changeOrderStatus(${o.id}, this.value)"
+                            class="border border-gold-300 rounded-xl px-3 py-1.5 bg-cream font-bold text-stone-800 focus:outline-none focus:border-gold-500">
+                        <option value="pending" ${o.status === "pending" ? "selected" : ""}>قيد المراجعة</option>
+                        <option value="confirmed" ${o.status === "confirmed" ? "selected" : ""}>مؤكد (خصم المخزن)</option>
+                        <option value="shipped" ${o.status === "shipped" ? "selected" : ""}>قيد التوصيل</option>
+                        <option value="delivered" ${o.status === "delivered" ? "selected" : ""}>تم التسليم</option>
+                        <option value="cancelled" ${o.status === "cancelled" ? "selected" : ""}>ملغي (إرجاع المخزن)</option>
+                    </select>
+                </td>
+            </tr>
+            `;
+        }).join("");
+    }
+
+    async function changeOrderStatus(orderId, newStatus) {
+        const res = await fetch(`/api/orders/${orderId}/update-status/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: newStatus })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            loadDashboardData();
+        } else {
+            alert(data.detail || "تعذر تحديث حالة الطلب.");
+            loadAllOrders();
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", loadDashboardData);
+</script>
+{% endblock %}

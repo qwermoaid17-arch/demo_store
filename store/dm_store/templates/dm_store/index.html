@@ -1,0 +1,199 @@
+{% extends "dm_store/base.html" %}
+
+{% block title %}بيت الجمال للعطور | التشكيلة الكاملة{% endblock %}
+
+{% block content %}
+<!-- واجهة ترحيبية (Hero Banner) بهوية بيت الجمال -->
+<section class="relative bg-obsidian text-white rounded-3xl overflow-hidden mb-10 border border-gold-500/40 shadow-lg">
+    <div class="absolute inset-0 gold-border-pattern opacity-15"></div>
+    <div class="relative px-6 py-10 md:px-12 md:py-14 flex flex-col md:flex-row items-center justify-between gap-8">
+        <div class="max-w-xl text-center md:text-right">
+            <span class="inline-block bg-gold-500/20 text-gold-400 border border-gold-500/30 text-xs font-bold px-3.5 py-1 rounded-full mb-3">
+                منذ 1998 • زليتن
+            </span>
+            <h2 class="font-luxury text-3xl md:text-5xl font-bold text-white leading-tight mb-3">
+                الجمال يبدأ من <span class="text-gold-400">هنا</span>
+            </h2>
+            <p class="text-stone-300 text-sm md:text-base leading-relaxed mb-6">
+                اكتشف أرقى تشكيلة من العطور الأصلية، مستحضرات التجميل الفاخرة، ومعدات الحلاقين والكوافير المختارة بعناية عبر أكثر من 28 عاماً من الخبرة.
+            </p>
+            <a href="#catalog" class="inline-block gold-gradient text-white font-bold px-7 py-2.5 rounded-full text-sm shadow-md hover:opacity-95 transition">
+                تصفح التشكيلة الآن ↓
+            </a>
+        </div>
+
+        <!-- بطاقة شعار فنية -->
+        <div class="bg-stone-900/90 border border-gold-500/40 p-6 rounded-2xl text-center min-w-[220px] shadow-inner">
+            <div class="w-24 h-24 mx-auto mb-3 rounded-full border-2 border-gold-400 flex items-center justify-center bg-obsidian">
+                <svg viewBox="0 0 64 64" class="w-16 h-16 text-gold-400" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <path d="M14 54V26C14 18 22 14 32 8C42 14 50 18 50 26V54" stroke-linecap="round"/>
+                    <path d="M20 54V29C20 23 26 19 32 15C38 19 44 23 44 29V54" stroke-width="1.3"/>
+                    <text x="32" y="27" text-anchor="middle" fill="currentColor" stroke="none" font-size="7" font-weight="bold">1998</text>
+                    <text x="32" y="42" text-anchor="middle" fill="currentColor" stroke="none" font-size="11" font-weight="bold">بيت</text>
+                    <text x="32" y="52" text-anchor="middle" fill="currentColor" stroke="none" font-size="9" font-weight="bold">الجمال</text>
+                </svg>
+            </div>
+            <p class="font-luxury text-gold-400 text-xl font-bold">بيت الجمال للعطور</p>
+            <p class="text-[11px] text-stone-400 mt-1">أصالة • جودة • ثقة</p>
+        </div>
+    </div>
+</section>
+
+<!-- شريط البحث وتصفية الأقسام -->
+<div id="catalog" class="bg-white p-4 rounded-2xl shadow-sm border border-gold-200/70 mb-8 flex flex-col md:flex-row gap-4 justify-between items-center">
+    <div class="flex flex-wrap gap-2 w-full md:w-auto" id="category-filters">
+        <button data-cat="" class="cat-btn gold-gradient text-white px-5 py-1.5 rounded-full text-sm font-bold shadow-sm transition">
+            جميع المنتجات
+        </button>
+        {% for cat in categories %}
+            <button data-cat="{{ cat.id }}" class="cat-btn bg-gold-50 hover:bg-gold-100 text-stone-700 border border-gold-200/60 px-4 py-1.5 rounded-full text-sm font-medium transition">
+                {{ cat.name }}
+            </button>
+        {% endfor %}
+    </div>
+
+    <div class="w-full md:w-72 relative">
+        <input type="text" id="search-input" placeholder="ابحث عن عطر أو منتج..."
+               class="w-full bg-cream border border-gold-200 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-gold-500">
+    </div>
+</div>
+
+<!-- شبكة عرض المنتجات -->
+<div id="products-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div class="col-span-full text-center py-12 text-stone-400">جاري عرض التشكيلة...</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let selectedCategory = "";
+    let searchQuery = "";
+
+    async function loadProducts() {
+        const grid = document.getElementById("products-grid");
+        let url = `/api/products/?`;
+        if (selectedCategory) url += `category=${selectedCategory}&`;
+        if (searchQuery) url += `search=${encodeURIComponent(searchQuery)}`;
+
+        try {
+            const res = await fetch(url);
+            const products = await res.json();
+
+            if (products.length === 0) {
+                grid.innerHTML = `<div class="col-span-full text-center py-12 text-stone-500">لا توجد منتجات مطابقة لبحثك حالياً.</div>`;
+                return;
+            }
+
+            grid.innerHTML = products.map(p => {
+                const hasDiscount = p.discount_percentage > 0;
+                const inStock = p.stock_quantity > 0;
+                const imgHtml = p.image
+                    ? `<img src="${p.image}" alt="${p.name}" class="w-full h-56 object-cover group-hover:scale-105 transition duration-500">`
+                    : `<div class="w-full h-56 bg-gold-50 flex flex-col items-center justify-center text-gold-500 text-xs">
+                           <span class="font-luxury text-2xl mb-1">بيت الجمال</span>
+                           <span>لا توجد صورة</span>
+                       </div>`;
+
+                return `
+                <div class="group bg-white rounded-2xl shadow-sm border border-gold-200/70 overflow-hidden flex flex-col justify-between hover:shadow-md hover:border-gold-400 transition">
+                    <div class="relative overflow-hidden">
+                        ${imgHtml}
+                        ${hasDiscount ? `<span class="absolute top-3 right-3 bg-obsidian text-gold-400 border border-gold-500/40 text-xs font-bold px-3 py-1 rounded-full">خصم ${p.discount_percentage}%</span>` : ""}
+                        <span class="absolute bottom-3 left-3 bg-white/90 backdrop-blur-sm text-stone-800 border border-gold-200 text-[11px] font-bold px-2.5 py-0.5 rounded-full">${p.category_name}</span>
+                    </div>
+
+                    <div class="p-5 flex-grow flex flex-col justify-between">
+                        <div>
+                            <h3 class="font-bold text-stone-900 text-base mb-1 group-hover:text-gold-600 transition">${p.name}</h3>
+                            <p class="text-xs text-stone-500 line-clamp-2 mb-4 leading-relaxed">${p.description || ""}</p>
+                        </div>
+
+                        <div class="pt-3 border-t border-gold-100">
+                            <div class="flex items-baseline justify-between mb-3">
+                                <div class="flex items-baseline gap-2">
+                                    <span class="text-lg font-extrabold text-gold-600">${p.final_price} د.ل</span>
+                                    ${hasDiscount ? `<span class="text-xs text-stone-400 line-through">${p.selling_price} د.ل</span>` : ""}
+                                </div>
+                            </div>
+
+                            ${inStock
+                                ? `<button onclick="addToCart(${p.id}, '${p.name.replace(/'/g, "\\'")}')"
+                                           class="w-full bg-obsidian hover:bg-gold-600 text-white py-2.5 rounded-full text-xs font-bold transition shadow-sm">
+                                       + أضف إلى الحقيبة
+                                   </button>`
+                                : `<button disabled class="w-full bg-stone-100 text-stone-400 py-2.5 rounded-full text-xs font-bold cursor-not-allowed">
+                                       نفدت الكمية حالياً
+                                   </button>`
+                            }
+                        </div>
+                    </div>
+                </div>
+                `;
+            }).join("");
+        } catch (err) {
+            grid.innerHTML = `<div class="col-span-full text-center py-12 text-red-500">حدث خطأ أثناء تحميل المنتجات.</div>`;
+        }
+    }
+
+    async function addToCart(productId, productName) {
+        let { name, phone } = getCustomer();
+        if (!phone) {
+            alert("يرجى إدخال اسمك ورقم هاتفك في الشريط العلوي أولاً لحفظ حقيبة التسوق.");
+            document.getElementById("cust-name").focus();
+            return;
+        }
+
+        let currentQty = 0;
+        const cartRes = await fetch(`/api/cart/?phone=${encodeURIComponent(phone)}`);
+        if (cartRes.ok) {
+            const cartData = await cartRes.json();
+            const existing = cartData.items.find(i => i.product === productId);
+            if (existing) currentQty = existing.quantity;
+        }
+
+        const res = await fetch("/api/cart/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                phone: phone,
+                name: name,
+                product_id: productId,
+                quantity: currentQty + 1
+            })
+        });
+
+        if (res.ok) {
+            refreshCartBadge();
+            alert(`تمت إضافة "${productName}" إلى حقيبة التسوق.`);
+        } else {
+            const err = await res.json();
+            alert(err.detail || "تعذرت الإضافة إلى الحقيبة.");
+        }
+    }
+
+    document.querySelectorAll(".cat-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(".cat-btn").forEach(b => {
+                b.classList.remove("gold-gradient", "text-white", "font-bold", "shadow-sm");
+                b.classList.add("bg-gold-50", "text-stone-700");
+            });
+            btn.classList.remove("bg-gold-50", "text-stone-700");
+            btn.classList.add("gold-gradient", "text-white", "font-bold", "shadow-sm");
+
+            selectedCategory = btn.dataset.cat;
+            loadProducts();
+        });
+    });
+
+    let searchTimer;
+    document.getElementById("search-input").addEventListener("input", (e) => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+            searchQuery = e.target.value.trim();
+            loadProducts();
+        }, 300);
+    });
+
+    document.addEventListener("DOMContentLoaded", loadProducts);
+</script>
+{% endblock %}
