@@ -1,252 +1,297 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}بيت الجمال للعطور | منذ 1998{% endblock %}</title>
-    <!-- Google Fonts: Amiri للعناوين الفاخرة و Tajawal للنصوص -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@700&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        gold: {
-                            50: '#FBF8F1',
-                            100: '#F5EEDB',
-                            200: '#EAD8B1',
-                            400: '#D4AF37',
-                            500: '#B89226',
-                            600: '#9A781C',
-                            700: '#7B5E14',
-                        },
-                        obsidian: '#121212',
-                        cream: '#FAF8F5',
-                    },
-                    fontFamily: {
-                        sans: ['Tajawal', 'sans-serif'],
-                        serif: ['Amiri', 'serif'],
-                    }
-                }
-            }
+
+from decimal import Decimal
+from django.shortcuts import render, get_object_or_404
+from django.db import transaction
+from django.db.models import Sum, F
+from django.contrib.auth import authenticate, login
+from django.contrib.admin.views.decorators import staff_member_required
+from rest_framework import viewsets, status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.response import Response
+
+from .models import StoreSettings, Category, Product, Customer, Cart, CartItem, Order, OrderItem
+from .serializers import (
+    StoreSettingsSerializer,
+    CategorySerializer,
+    ProductSerializer,
+    CartSerializer,
+    OrderSerializer,
+    CheckoutSerializer,
+)
+
+
+def get_store_context():
+    settings_obj, _ = StoreSettings.objects.get_or_create(id=1)
+    return {"store_settings": settings_obj}
+
+
+def home_page(request):
+    context = get_store_context()
+    context["categories"] = Category.objects.filter(is_active=True)
+    return render(request, "dm_store/index.html", context)
+
+
+def cart_page(request):
+    return render(request, "dm_store/cart.html", get_store_context())
+
+
+def track_page(request):
+    return render(request, "dm_store/track.html", get_store_context())
+
+
+@staff_member_required(login_url="/admin/login/")
+def dashboard_page(request):
+    return render(request, "dm_store/dashboard.html", get_store_context())
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def quick_auth_login(request):
+    name = (request.data.get("name") or "").strip()
+    phone = (request.data.get("phone") or "").strip()
+
+    if not name or not phone:
+        return Response({"is_admin": False}, status=status.HTTP_200_OK)
+
+    user = authenticate(request, username=name, password=phone)
+    if user is not None and user.is_staff:
+        login(request, user)
+        return Response(
+            {
+                "is_admin": True,
+                "message": f"أهلاً بك يا {user.username}، تم تفعيل وضع الإدارة بنجاح.",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    return Response({"is_admin": False}, status=status.HTTP_200_OK)
+
+
+class ProductViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = ProductSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        queryset = Product.objects.filter(is_active=True).select_related("category")
+        category_id = self.request.query_params.get("category")
+        search = self.request.query_params.get("search")
+
+        if category_id:
+            queryset = queryset.filter(category_id=category_id)
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        return queryset
+
+
+@api_view(["GET", "POST", "DELETE"])
+@permission_classes([AllowAny])
+def cart_api(request):
+    phone = (request.query_params.get("phone") or request.data.get("phone") or "").strip()
+    name = (request.data.get("name") or "زبون").strip()
+
+    if not phone:
+        return Response({"detail": "رقم الهاتف مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
+
+    customer, _ = Customer.objects.get_or_create(
+        phone=phone, defaults={"full_name": name}
+    )
+    if name and name != "زبون" and customer.full_name != name:
+        customer.full_name = name
+        customer.save(update_fields=["full_name"])
+
+    cart, _ = Cart.objects.get_or_create(customer=customer)
+
+    if request.method == "GET":
+        return Response(CartSerializer(cart).data)
+
+    product_id = request.data.get("product_id")
+    if not product_id:
+        return Response({"detail": "معرف المنتج مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
+
+    product = get_object_or_404(Product, id=product_id, is_active=True)
+
+    if request.method == "DELETE":
+        CartItem.objects.filter(cart=cart, product=product).delete()
+        return Response(CartSerializer(cart).data)
+
+    quantity = int(request.data.get("quantity", 1))
+    if quantity <= 0:
+        CartItem.objects.filter(cart=cart, product=product).delete()
+        return Response(CartSerializer(cart).data)
+
+    if quantity > product.stock_quantity:
+        return Response(
+            {"detail": f"الكمية المتوفرة في المخزن هي {product.stock_quantity} فقط."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    cart_item, created = CartItem.objects.get_or_create(
+        cart=cart, product=product, defaults={"quantity": quantity}
+    )
+    if not created:
+        cart_item.quantity = quantity
+        cart_item.save()
+
+    return Response(CartSerializer(cart).data)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@transaction.atomic
+def checkout_api(request):
+    serializer = CheckoutSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+
+    customer, _ = Customer.objects.get_or_create(
+        phone=data["phone"],
+        defaults={
+            "full_name": data["name"],
+            "city": data["city"],
+            "address": data["address"],
+        },
+    )
+    customer.full_name = data["name"]
+    customer.city = data["city"]
+    customer.address = data["address"]
+    customer.save()
+
+    cart = getattr(customer, "cart", None)
+    if not cart or not cart.items.exists():
+        return Response({"detail": "حقيبة التسوق فارغة."}, status=status.HTTP_400_BAD_REQUEST)
+
+    cart_items = list(cart.items.select_related("product"))
+    for item in cart_items:
+        if item.quantity > item.product.stock_quantity:
+            return Response(
+                {"detail": f"المنتج '{item.product.name}' لم يعد متوفراً بالكمية المطلوبة."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    order = Order.objects.create(
+        customer=customer,
+        customer_name=data["name"],
+        customer_phone=data["phone"],
+        city=data["city"],
+        address=data["address"],
+        latitude=data.get("latitude"),
+        longitude=data.get("longitude"),
+        notes=data.get("notes", ""),
+    )
+
+    total = Decimal("0.00")
+    for item in cart_items:
+        unit_price = item.product.final_price
+        OrderItem.objects.create(
+            order=order,
+            product=item.product,
+            product_name=item.product.name,
+            quantity=item.quantity,
+            unit_price=unit_price,
+            cost_price=item.product.cost_price,
+        )
+        total += unit_price * item.quantity
+
+    order.total_amount = total
+    order.save(update_fields=["total_amount"])
+
+    cart.items.all().delete()
+    return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def track_orders_api(request):
+    phone = (request.query_params.get("phone") or "").strip()
+    if not phone:
+        return Response({"detail": "يرجى إدخال رقم الهاتف."}, status=status.HTTP_400_BAD_REQUEST)
+
+    orders = Order.objects.filter(customer_phone=phone).prefetch_related("items").order_by("-created_at")
+    return Response(OrderSerializer(orders, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def admin_orders_api(request):
+    orders = Order.objects.all().prefetch_related("items").order_by("-created_at")
+    return Response(OrderSerializer(orders, many=True).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+@transaction.atomic
+def update_order_status_api(request, order_id):
+    order = get_object_or_404(Order.objects.prefetch_related("items__product"), id=order_id)
+    new_status = request.data.get("status")
+
+    valid_statuses = dict(Order.STATUS_CHOICES).keys()
+    if new_status not in valid_statuses:
+        return Response({"detail": "حالة طلب غير صالحة."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if new_status in ["confirmed", "shipped", "delivered"] and not order.stock_deducted:
+        for item in order.items.all():
+            if item.product:
+                if item.product.stock_quantity < item.quantity:
+                    return Response(
+                        {"detail": f"المخزن غير كافٍ للمنتج: {item.product.name}"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                item.product.stock_quantity -= item.quantity
+                item.product.save(update_fields=["stock_quantity"])
+        order.stock_deducted = True
+
+    elif new_status == "cancelled" and order.stock_deducted:
+        for item in order.items.all():
+            if item.product:
+                item.product.stock_quantity += item.quantity
+                item.product.save(update_fields=["stock_quantity"])
+        order.stock_deducted = False
+
+    order.status = new_status
+    order.save(update_fields=["status", "stock_deducted"])
+    return Response(OrderSerializer(order).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def dashboard_analytics_api(request):
+    confirmed_orders = Order.objects.filter(status__in=["confirmed", "shipped", "delivered"])
+    total_revenue = confirmed_orders.aggregate(total=Sum("total_amount"))["total"] or Decimal("0.00")
+
+    profit_data = OrderItem.objects.filter(
+        order__status__in=["confirmed", "shipped", "delivered"]
+    ).aggregate(
+        total_profit=Sum((F("unit_price") - F("cost_price")) * F("quantity"))
+    )
+    total_profit = profit_data["total_profit"] or Decimal("0.00")
+
+    pending_count = Order.objects.filter(status="pending").count()
+    confirmed_count = confirmed_orders.count()
+
+    low_stock = list(
+        Product.objects.filter(is_active=True, stock_quantity__lte=3).values(
+            "id", "name", "sku", "stock_quantity"
+        )
+    )
+
+    top_selling = list(
+        OrderItem.objects.filter(order__status__in=["confirmed", "shipped", "delivered"])
+        .values("product__name")
+        .annotate(
+            total_sold=Sum("quantity"),
+            revenue=Sum(F("unit_price") * F("quantity")),
+        )
+        .order_by("-total_sold")[:5]
+    )
+
+    return Response(
+        {
+            "total_revenue": total_revenue,
+            "total_profit": total_profit,
+            "pending_orders_count": pending_count,
+            "confirmed_orders_count": confirmed_count,
+            "low_stock_products": low_stock,
+            "top_selling_products": top_selling,
         }
-    </script>
-    <!-- Leaflet Maps CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-        body { font-family: 'Tajawal', sans-serif; background-color: #FAF8F5; }
-        .font-luxury { font-family: 'Amiri', serif; }
-        .gold-gradient { background: linear-gradient(135deg, #C9A227 0%, #9E7B18 100%); }
-        .gold-border-pattern {
-            background-image: radial-gradient(#B89226 0.75px, transparent 0.75px);
-            background-size: 16px 16px;
-        }
-    </style>
-</head>
-<body class="bg-cream text-stone-800 flex flex-col min-h-screen selection:bg-gold-500 selection:text-white">
-
-    <!-- شريط علوي رفيع لهوية العلامة -->
-    <div class="bg-obsidian text-gold-200 text-xs py-1.5 px-4 border-b border-gold-500/20">
-        <div class="max-w-6xl mx-auto flex flex-wrap justify-between items-center gap-2">
-            <span>✨ الجمال يبدأ من هنا — خبرة تمتد أكثر من 28 عاماً منذ 1998</span>
-            <span class="text-stone-400">زليتن • ليبيا</span>
-        </div>
-    </div>
-
-    <!-- شريط التنقل الرئيسي -->
-    <header class="bg-white/95 backdrop-blur-md border-b border-gold-200/70 sticky top-0 z-50 shadow-sm">
-        <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-            <a href="/" class="flex items-center gap-3.5 group">
-                {% if store_settings.logo %}
-                    <img src="{{ store_settings.logo.url }}" alt="بيت الجمال" class="h-12 w-12 rounded-full object-cover border-2 border-gold-500 p-0.5 shadow-sm">
-                {% else %}
-                    <!-- شعار قوس بيت الجمال المدمج (SVG) مطابق لهوية المتجر -->
-                    <div class="h-12 w-12 rounded-full border-2 border-gold-500 flex items-center justify-center bg-gold-50 shadow-sm group-hover:scale-105 transition">
-                        <svg viewBox="0 0 64 64" class="w-9 h-9 text-gold-500" fill="none" stroke="currentColor" stroke-width="2.5">
-                            <path d="M14 54V26C14 18 22 14 32 8C42 14 50 18 50 26V54" stroke-linecap="round"/>
-                            <path d="M20 54V29C20 23 26 19 32 15C38 19 44 23 44 29V54" stroke-width="1.5"/>
-                            <text x="32" y="27" text-anchor="middle" fill="currentColor" stroke="none" font-size="7" font-weight="bold">1998</text>
-                            <text x="32" y="42" text-anchor="middle" fill="currentColor" stroke="none" font-size="11" font-weight="bold">بيت</text>
-                            <text x="32" y="52" text-anchor="middle" fill="currentColor" stroke="none" font-size="9" font-weight="bold">الجمال</text>
-                        </svg>
-                    </div>
-                {% endif %}
-                <div>
-                    <h1 class="font-luxury text-2xl font-bold text-stone-900 tracking-wide">
-                        {% if store_settings.store_name != "TechSetup Store" %}{{ store_settings.store_name }}{% else %}بيت الجمال للعطور{% endif %}
-                    </h1>
-                    <p class="text-[11px] text-gold-600 font-medium">عطور • مستحضرات تجميل • معدات الكوافير</p>
-                </div>
-            </a>
-
-            <nav class="flex items-center gap-5 text-sm font-medium">
-                <a href="/" class="text-stone-700 hover:text-gold-600 transition">التشكيلة</a>
-                <a href="/track/" class="text-stone-700 hover:text-gold-600 transition">تتبع طلبي</a>
-                {% if user.is_staff %}
-                    <a href="/dashboard/" class="bg-obsidian text-gold-400 border border-gold-500/40 hover:bg-stone-800 px-3.5 py-1.5 rounded-full text-xs font-bold transition">
-                        لوحة الإدارة
-                    </a>
-                {% endif %}
-                <a href="/cart/" class="gold-gradient hover:opacity-95 text-white px-4 py-2 rounded-full font-bold transition shadow-sm flex items-center gap-2">
-                    <span>حقيبة التسوق</span>
-                    <span id="nav-cart-count" class="bg-white text-gold-700 text-xs font-extrabold px-2 py-0.5 rounded-full">0</span>
-                </a>
-            </nav>
-        </div>
-    </header>
-
-    <!-- شريط تعريف الزبون الأنيق -->
-    <div id="customer-bar" class="bg-gold-50/90 border-b border-gold-200/60 py-2.5 px-4 text-sm">
-        <div class="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-2">
-            <div id="customer-info-display" class="text-stone-700 flex items-center gap-1.5">
-                <span class="text-gold-600">✦</span>
-                <span>أهلاً بك في بيت الجمال! سجّل اسمك ورقم هاتفك لحفظ حقيبتك ومتابعة طلباتك:</span>
-            </div>
-            <form id="quick-customer-form" class="flex flex-wrap items-center gap-2">
-                <input type="text" id="cust-name" placeholder="الاسم الكريم" required
-                       class="bg-white border border-gold-200 rounded-full px-3.5 py-1 text-xs focus:outline-none focus:border-gold-500">
-                <input type="tel" id="cust-phone" placeholder="رقم الهاتف (09XXXXXXXX)" required
-                       class="bg-white border border-gold-200 rounded-full px-3.5 py-1 text-xs focus:outline-none focus:border-gold-500">
-                <button type="submit" class="bg-obsidian text-gold-200 px-4 py-1 rounded-full text-xs font-bold hover:bg-stone-800 transition">
-                    حفظ
-                </button>
-            </form>
-        </div>
-    </div>
-
-    <!-- المحتوى المتغير -->
-    <main class="flex-grow max-w-6xl w-full mx-auto px-4 py-8">
-        {% block content %}{% endblock %}
-    </main>
-
-    <!-- التذييل الملكي وفروع بيت الجمال -->
-    <footer class="bg-obsidian text-stone-300 mt-16 border-t-2 border-gold-500">
-        <div class="max-w-6xl mx-auto px-4 py-10 grid grid-cols-1 md:grid-cols-3 gap-8 text-sm">
-            <div>
-                <h3 class="font-luxury text-gold-400 font-bold text-2xl mb-2">بيت الجمال للعطور</h3>
-                <p class="text-stone-400 text-xs leading-relaxed mb-3">
-                    خبرة تمتد لأكثر من 28 عاماً منذ 1998 في أرقى العطور العالمية والشرقية، مستحضرات التجميل، ومعدات الحلاقين والكوافير.
-                </p>
-                <span class="inline-block text-xs text-gold-400 border border-gold-500/30 px-3 py-1 rounded-full">
-                    ✨ الجمال يبدأ من هنا
-                </span>
-            </div>
-
-            <div>
-                <h4 class="text-white font-bold text-base mb-3 border-b border-stone-800 pb-2">فروعنا في زليتن</h4>
-                <ul class="space-y-2 text-xs text-stone-400">
-                    <li>📍 <strong class="text-stone-200">الفرع الأول:</strong> وسط المدينة بالقرب من ميدان الساعة، زليتن.</li>
-                    <li>📍 <strong class="text-stone-200">الفرع الثاني:</strong> وسط المدينة بالقرب من مصرف الجمهورية ومبنى الجوازات.</li>
-                    {% if store_settings.address %}
-                        <li>📍 {{ store_settings.address }}</li>
-                    {% endif %}
-                </ul>
-            </div>
-
-            <div class="flex flex-col justify-between md:items-end">
-                <div class="space-y-1.5 text-xs md:text-left">
-                    <h4 class="text-white font-bold text-base mb-2">تواصل معنا</h4>
-                    {% if store_settings.phone_number %}
-                        <p>الهاتف: <span dir="ltr" class="text-gold-400 font-bold">{{ store_settings.phone_number }}</span></p>
-                    {% endif %}
-                    {% if store_settings.whatsapp_number %}
-                        <p>واتساب: <span dir="ltr" class="text-gold-400 font-bold">{{ store_settings.whatsapp_number }}</span></p>
-                    {% endif %}
-                </div>
-
-                {% if store_settings.google_maps_url %}
-                    <a href="{{ store_settings.google_maps_url }}" target="_blank"
-                       class="mt-4 inline-block gold-gradient text-white px-5 py-2 rounded-full text-xs font-bold shadow hover:opacity-95 transition">
-                        📍 موقع المعرض على خرائط جوجل
-                    </a>
-                {% endif %}
-            </div>
-        </div>
-        <div class="border-t border-stone-800/80 py-4 text-center text-xs text-stone-500">
-            © جميع الحقوق محفوظة لـ بيت الجمال للعطور ومستحضرات التجميل (منذ 1998)
-        </div>
-    </footer>
-
-    <!-- Leaflet Maps JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-    <!-- سكربت مشترك لإدارة الحماية (CSRF)، بيانات الزبون، وعداد السلة -->
-    <script>
-        function getCookie(name) {
-            let cookieValue = null;
-            if (document.cookie && document.cookie !== "") {
-                const cookies = document.cookie.split(";");
-                for (let i = 0; i < cookies.length; i++) {
-                    const cookie = cookies[i].trim();
-                    if (cookie.substring(0, name.length + 1) === (name + "=")) {
-                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                        break;
-                    }
-                }
-            }
-            return cookieValue;
-        }
-
-        const originalFetch = window.fetch;
-        window.fetch = function (url, options = {}) {
-            const method = (options.method || "GET").toUpperCase();
-            if (!["GET", "HEAD", "OPTIONS", "TRACE"].includes(method)) {
-                options.headers = {
-                    ...options.headers,
-                    "X-CSRFToken": getCookie("csrftoken") || "{{ csrf_token }}"
-                };
-            }
-            return originalFetch(url, options);
-        };
-
-        function getCustomer() {
-            return {
-                name: localStorage.getItem("customer_name") || "",
-                phone: localStorage.getItem("customer_phone") || ""
-            };
-        }
-
-        function updateCustomerUI() {
-            const { name, phone } = getCustomer();
-            const display = document.getElementById("customer-info-display");
-            if (phone) {
-                document.getElementById("cust-name").value = name;
-                document.getElementById("cust-phone").value = phone;
-                display.innerHTML = `<span class="text-gold-600">✦</span> مرحباً بك <strong>${name}</strong> (<span dir="ltr">${phone}</span>)`;
-                refreshCartBadge();
-            }
-        }
-
-        async function refreshCartBadge() {
-            const { phone } = getCustomer();
-            if (!phone) return;
-            try {
-                const res = await fetch(`/api/cart/?phone=${encodeURIComponent(phone)}`);
-                if (res.ok) {
-                    const data = await res.json();
-                    document.getElementById("nav-cart-count").textContent = data.total_items || 0;
-                }
-            } catch (e) { console.error(e); }
-        }
-
-        document.getElementById("quick-customer-form").addEventListener("submit", (e) => {
-            e.preventDefault();
-            const name = document.getElementById("cust-name").value.trim();
-            const phone = document.getElementById("cust-phone").value.trim();
-            if (name && phone) {
-                localStorage.setItem("customer_name", name);
-                localStorage.setItem("customer_phone", phone);
-                updateCustomerUI();
-            }
-        });
-
-        document.addEventListener("DOMContentLoaded", updateCustomerUI);
-    </script>
-
-    {% block extra_js %}{% endblock %}
-</body>
-</html>
+    )

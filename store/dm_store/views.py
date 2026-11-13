@@ -9,6 +9,10 @@ from django.db.models import Sum, Count, F
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import render
 from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib.auth import authenticate, login
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 
 from .models import (
     StoreSettings, Category, Product,
@@ -353,3 +357,25 @@ def dashboard_page(request):
     return render(request, "dm_store/dashboard.html", {
         "store_settings": StoreSettings.load(),
     })
+
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def quick_auth_login(request):
+    name = (request.data.get("name") or "").strip()
+    phone = (request.data.get("phone") or "").strip()
+
+    if not name or not phone:
+        return Response({"is_admin": False}, status=200)
+
+    # التحقق مما إذا كان الاسم والرقم يطابقان حساب مدير في جدول Users
+    user = authenticate(request, username=name, password=phone)
+    if user is not None and user.is_staff:
+        login(request, user)
+        return Response({
+            "is_admin": True,
+            "message": f"أهلاً بك يا {user.username}، تم تفعيل وضع الإدارة بنجاح."
+        }, status=200)
+
+    return Response({"is_admin": False}, status=200)

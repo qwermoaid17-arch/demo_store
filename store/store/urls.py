@@ -5,6 +5,10 @@ from django.conf.urls.static import static
 from dm_store.views import home_page
 from dm_store.views import home_page, cart_page, track_page, dashboard_page
 
+admin.site.site_url = "/dashboard/"
+admin.site.site_header = "إدارة متجر بيت الجمال للعطور"
+admin.site.site_title = "لوحة التحكم"
+
 urlpatterns = [
     path("", home_page, name="home"),
     path("cart/", cart_page, name="cart"),

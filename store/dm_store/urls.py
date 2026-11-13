@@ -1,3 +1,4 @@
+from . import views
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
@@ -16,4 +17,5 @@ urlpatterns = [
     path("cart/", CartAPIView.as_view(), name="cart-api"),
     path("dashboard/analytics/", DashboardAnalyticsView.as_view(), name="dashboard-analytics"),
     path("pos/sync/", POSSyncAPIView.as_view(), name="pos-sync"),
+    path("quick-auth/", views.quick_auth_login, name="quick-auth"),
 ]
